@@ -1,7 +1,7 @@
 import os
 
 def get_token() -> str:
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "8971462848:AAEaguwPAz_UvSLLUXGA1PwHJjUtBTK54w4").strip()
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "Your token").strip()
     if not token:
         raise RuntimeError(
             "Не задан токен Telegram-бота. "
