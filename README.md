@@ -16,7 +16,7 @@
 
 
 Вот это надо, чтобы его включить.
-.\.venv\Scripts\python.exe .\main.py
+& ".\.venv\Scripts\python.exe" ".\main.py"
 
 
 
