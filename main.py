@@ -1,583 +1,263 @@
-
-from pathlib import Path
-
 import telebot
 from telebot import types
 
-from config import TOKEN
-from database import init_db, save_user, get_user_count
+from config import get_token
+from database import init_db, save_user, save_profile, get_profile, get_user_count
+from recommendations import CAREERS, recommend_career, get_career_text
 
-
-# ==========================================
-# НАСТРОЙКИ
-# ==========================================
-
-if not TOKEN:
-    raise RuntimeError(
-        "Не найден токен! Задай TELEGRAM_BOT_TOKEN."
-    )
-
+TOKEN = get_token()
 bot = telebot.TeleBot(TOKEN)
-
-BASE_DIR = Path(__file__).parent
-MATERIALS_DIR = BASE_DIR / "materials"
-
 init_db()
 
+# Ответы профориентационного диалога хранятся в памяти, профиль — в SQLite.
+quiz_data = {}
 
-# ==========================================
-# ПРОФЕССИИ И УЧЕБНЫЕ МАТЕРИАЛЫ
-# ==========================================
-
-CAREERS = {
-    "python": {
-        "title": "💻 Python-разработчик",
-        "description": "Создаёт программы, Telegram-ботов и приложения.",
-        "pros": "Python применяется в автоматизации, веб-разработке и анализе данных.",
-        "cons": "Нужно развивать логику, практиковаться и исправлять ошибки.",
-        "links": [
-            ("📖 Учебник Python", "https://docs.python.org/3/tutorial/"),
-            ("🎓 Практика Python", "https://www.kaggle.com/learn/intro-to-programming"),
-            ("🎬 Видео Python", "https://www.youtube.com/results?search_query=Python+для+начинающих")
-        ]
-    },
-
-    "games": {
-        "title": "🎮 Разработчик игр",
-        "description": "Создаёт игровые механики, уровни, персонажей и интерфейсы.",
-        "pros": "Можно придумывать и создавать собственные игры.",
-        "cons": "Большие проекты требуют времени и командной работы.",
-        "links": [
-            ("📖 Первый проект Godot", "https://docs.godotengine.org/en/latest/getting_started/first_2d_game/index.html"),
-            ("🎓 Обучение Godot", "https://godotengine.org/"),
-            ("🎬 Видео по созданию игр", "https://www.youtube.com/results?search_query=Godot+для+начинающих")
-        ]
-    },
-
-    "qa": {
-        "title": "🧪 Тестировщик ПО",
-        "description": "Проверяет программы, находит ошибки и описывает их.",
-        "pros": "Можно начинать с ручного тестирования и простых проектов.",
-        "cons": "Нужно внимательно проверять множество сценариев.",
-        "links": [
-            ("📖 Основы тестирования", "https://www.istqb.org/"),
-            ("🎓 Практика тестирования", "https://www.ministryoftesting.com/"),
-            ("🎬 Видео по тестированию", "https://www.youtube.com/results?search_query=тестирование+ПО+для+начинающих")
-        ]
-    },
-
-    "web": {
-        "title": "🌐 Веб-разработчик",
-        "description": "Создаёт сайты и веб-приложения.",
-        "pros": "Можно быстро увидеть результат в браузере.",
-        "cons": "Нужно изучать HTML, CSS и JavaScript.",
-        "links": [
-            ("📖 Учебник MDN", "https://developer.mozilla.org/en-US/docs/Learn_web_development"),
-            ("🎓 Курсы freeCodeCamp", "https://www.freecodecamp.org/learn/"),
-            ("🎬 Видео по веб-разработке", "https://www.youtube.com/results?search_query=HTML+CSS+JavaScript+для+начинающих")
-        ]
-    },
-
-    "design": {
-        "title": "🎨 UI/UX-дизайнер",
-        "description": "Проектирует внешний вид сайтов и удобство приложений.",
-        "pros": "Можно сочетать творчество, дизайн и технологии.",
-        "cons": "Нужно изучать композицию, интерфейсы и потребности пользователей.",
-        "links": [
-            ("📖 Figma Learn", "https://help.figma.com/hc/en-us/categories/360002051613-Learn-design"),
-            ("🎓 Основы веб-дизайна", "https://www.interaction-design.org/"),
-            ("🎬 Видео по UI/UX", "https://www.youtube.com/results?search_query=UI+UX+дизайн+для+начинающих")
-        ]
-    },
-
-    "data": {
-        "title": "📊 Аналитик данных",
-        "description": "Изучает данные, таблицы и ищет закономерности.",
-        "pros": "Помогает находить полезные выводы из информации.",
-        "cons": "Нужно изучать математику, таблицы и инструменты анализа.",
-        "links": [
-            ("📖 Kaggle Learn", "https://www.kaggle.com/learn/"),
-            ("🎓 Основы SQL", "https://sqlbolt.com/"),
-            ("🎬 Видео по анализу данных", "https://www.youtube.com/results?search_query=анализ+данных+для+начинающих")
-        ]
-    }
-}
-
-
-# ==========================================
-# ГЛАВНОЕ МЕНЮ
-# ==========================================
-
-def create_menu():
-    keyboard = types.ReplyKeyboardMarkup(
-        resize_keyboard=True
-    )
-
-    keyboard.row(
-        "🤖 О проекте",
-        "💼 Профессии"
-    )
-
-    keyboard.row(
-        "📚 Выучить что-то",
-        "💼 Работа"
-    )
-
-    keyboard.row(
-        "👤 Мой профиль"
-    )
-
+def main_menu():
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.row("🧭 Подобрать профессию", "💼 Профессии")
+    keyboard.row("📚 Выучить что-то", "🧰 Развитие навыков")
+    keyboard.row("👤 Мой профиль", "ℹ️ О проекте")
     return keyboard
 
+def inline_links(items):
+    keyboard = types.InlineKeyboardMarkup()
+    for title, url in items:
+        keyboard.add(types.InlineKeyboardButton(title, url=url))
+    return keyboard
 
-# ==========================================
-# СТАРТ
-# ==========================================
+def show_career_list(chat_id):
+    keyboard = types.InlineKeyboardMarkup()
+    for key, career in CAREERS.items():
+        keyboard.add(types.InlineKeyboardButton(
+            career["title"], callback_data=f"career:{key}"
+        ))
+    bot.send_message(chat_id, "Выбери профессию, о которой хочешь узнать:", reply_markup=keyboard)
+
+def start_quiz(message):
+    user_id = message.from_user.id
+    quiz_data[user_id] = {}
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    keyboard.row("Выбираю профессию впервые", "Хочу сменить направление")
+    keyboard.row("❌ Отмена")
+    msg = bot.send_message(
+        message.chat.id,
+        "🧭 Давай подберём направление! Это не окончательный выбор профессии, "
+        "а подсказка для знакомства с разными сферами.\n\n"
+        "1/4. Ты выбираешь профессию впервые или хочешь сменить направление?",
+        reply_markup=keyboard
+    )
+    bot.register_next_step_handler(msg, quiz_stage)
+
+def quiz_stage(message):
+    if message.text == "❌ Отмена":
+        return cancel_quiz(message)
+    quiz_data[message.from_user.id]["stage"] = message.text
+    msg = bot.send_message(
+        message.chat.id,
+        "2/4. Что тебе интересно? Напиши несколько вещей своими словами. "
+        "Например: рисование, компьютеры, игры, техника, математика, помощь людям.",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    bot.register_next_step_handler(msg, quiz_interests)
+
+def quiz_interests(message):
+    if message.text == "❌ Отмена":
+        return cancel_quiz(message)
+    quiz_data[message.from_user.id]["interests"] = message.text.strip()[:1000]
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    keyboard.row("Создавать и придумывать", "Решать задачи и искать ошибки")
+    keyboard.row("Общаться и помогать", "Работать с числами и информацией")
+    keyboard.row("❌ Отмена")
+    msg = bot.send_message(
+        message.chat.id,
+        "3/4. Какие занятия тебе ближе? Выбери вариант.",
+        reply_markup=keyboard
+    )
+    bot.register_next_step_handler(msg, quiz_tasks)
+
+def quiz_tasks(message):
+    if message.text == "❌ Отмена":
+        return cancel_quiz(message)
+    quiz_data[message.from_user.id]["preferred_tasks"] = message.text
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    keyboard.row("Пока новичок", "Уже немного пробовал")
+    keyboard.row("Есть небольшой опыт", "❌ Отмена")
+    msg = bot.send_message(message.chat.id, "4/4. Какой у тебя сейчас опыт?", reply_markup=keyboard)
+    bot.register_next_step_handler(msg, quiz_finish)
+
+def quiz_finish(message):
+    user_id = message.from_user.id
+    if message.text == "❌ Отмена":
+        return cancel_quiz(message)
+    data = quiz_data.pop(user_id, {})
+    data["experience"] = message.text
+    career_id = recommend_career(data.get("interests", ""), data.get("preferred_tasks", ""))
+    save_profile(
+        user_id,
+        data.get("stage", ""),
+        data.get("interests", ""),
+        data.get("preferred_tasks", ""),
+        data.get("experience", ""),
+        career_id
+    )
+    career = CAREERS[career_id]
+    text = (
+        f"✨ Моя первая рекомендация: {career['title']}\n\n"
+        f"Почему этот вариант может тебе подойти: {career['description']}\n\n"
+        f"Это только предварительная рекомендация — попробуй мини-задание и посмотри, "
+        f"нравится ли тебе сам процесс.\n\n"
+        f"🎯 Твоё мини-задание:\n{career['task']}"
+    )
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(types.InlineKeyboardButton("Подробнее о профессии", callback_data=f"career:{career_id}"))
+    keyboard.add(types.InlineKeyboardButton("Материалы для обучения", callback_data=f"learn:{career_id}"))
+    bot.send_message(message.chat.id, text, reply_markup=keyboard)
+    bot.send_message(message.chat.id, "Можешь продолжить изучение через меню 👇", reply_markup=main_menu())
+
+def cancel_quiz(message):
+    quiz_data.pop(message.from_user.id, None)
+    bot.send_message(message.chat.id, "Опрос отменён.", reply_markup=main_menu())
 
 @bot.message_handler(commands=["start"])
 def start(message):
-    user = message.from_user
-
-    save_user(
-        user.id,
-        user.username,
-        user.first_name
-    )
-
-    name = user.first_name or "друг"
-
+    save_user(message.from_user.id, message.from_user.username, message.from_user.first_name)
     bot.send_message(
         message.chat.id,
-        f"Привет, {name}! 👋\n\n"
-        "Я RoboCareer — твой помощник "
-        "в мире профессий! 🤖\n\n"
-        "💼 Знакомься с профессиями.\n"
-        "📚 Изучай новые навыки.\n"
-        "🎬 Находи учебные видео.\n"
-        "📄 Получай учебные файлы.\n"
-        "🔎 Открывай полезные ресурсы.\n\n"
-        "Выбери раздел ниже 👇",
-        reply_markup=create_menu()
+        "🤖 Привет! Я RoboCareer — помогу исследовать профессии, "
+        "найти учебные материалы и попробовать небольшие задания.\n"
+        "Нажми «Подобрать профессию», чтобы начать.",
+        reply_markup=main_menu()
     )
-
-
-# ==========================================
-# ПОМОЩЬ И СТАТИСТИКА
-# ==========================================
 
 @bot.message_handler(commands=["help"])
 def help_command(message):
     bot.send_message(
         message.chat.id,
         "/start — главное меню\n"
-        "/help — помощь\n"
-        "/stats — количество пользователей"
+        "/profile — показать профиль\n"
+        "/quiz — начать профориентацию\n"
+        "/cancel — отменить текущий опрос",
+        reply_markup=main_menu()
     )
 
+@bot.message_handler(commands=["quiz"])
+def quiz_command(message):
+    start_quiz(message)
+
+@bot.message_handler(commands=["profile"])
+def profile_command(message):
+    show_profile(message)
+
+@bot.message_handler(commands=["cancel"])
+def cancel_command(message):
+    cancel_quiz(message)
 
 @bot.message_handler(commands=["stats"])
-def stats(message):
-    bot.send_message(
-        message.chat.id,
-        f"📊 Пользователей в базе: {get_user_count()}"
+def stats_command(message):
+    # В учебной версии статистика доступна только локальному владельцу проекта.
+    bot.send_message(message.chat.id, f"👥 Пользователей в базе: {get_user_count()}")
+
+@bot.message_handler(func=lambda m: m.text == "🧭 Подобрать профессию")
+def quiz_button(message):
+    start_quiz(message)
+
+@bot.message_handler(func=lambda m: m.text == "💼 Профессии")
+def professions_button(message):
+    show_career_list(message.chat.id)
+
+@bot.message_handler(func=lambda m: m.text == "📚 Выучить что-то")
+def learn_menu(message):
+    keyboard = types.InlineKeyboardMarkup()
+    for key, career in CAREERS.items():
+        keyboard.add(types.InlineKeyboardButton(
+            f"Учиться: {career['title']}", callback_data=f"learn:{key}"
+        ))
+    bot.send_message(message.chat.id, "Выбери направление — покажу учебные ресурсы:", reply_markup=keyboard)
+
+@bot.message_handler(func=lambda m: m.text == "🧰 Развитие навыков")
+def skills_menu(message):
+    profile = get_profile(message.from_user.id)
+    career_id = profile["recommended_career"] if profile else None
+    if career_id in CAREERS:
+        career = CAREERS[career_id]
+        bot.send_message(
+            message.chat.id,
+            f"Для направления «{career['title']}» можно собрать небольшое портфолио. "
+            "Начни с мини-задания из профориентации, затем сохрани результат и кратко опиши, "
+            "что ты сделал и чему научился.",
+            reply_markup=inline_links(career["portfolio"])
+        )
+    else:
+        bot.send_message(message.chat.id, "Сначала пройди профориентацию — тогда я подберу ресурсы под твоё направление.")
+
+@bot.message_handler(func=lambda m: m.text == "👤 Мой профиль")
+def profile_button(message):
+    show_profile(message)
+
+def show_profile(message):
+    profile = get_profile(message.from_user.id)
+    if not profile:
+        bot.send_message(message.chat.id, "Профиль пока пуст. Нажми «Подобрать профессию», чтобы заполнить его.", reply_markup=main_menu())
+        return
+    career = CAREERS.get(profile["recommended_career"], {})
+    text = (
+        "👤 Твой профиль\n\n"
+        f"Выбор: {profile['stage']}\n"
+        f"Интересы: {profile['interests']}\n"
+        f"Предпочтения: {profile['preferred_tasks']}\n"
+        f"Опыт: {profile['experience']}\n"
+        f"Рекомендация: {career.get('title', 'Пока нет')}"
     )
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(types.InlineKeyboardButton("Пройти опрос заново", callback_data="quiz:restart"))
+    bot.send_message(message.chat.id, text, reply_markup=keyboard)
 
-
-# ==========================================
-# О ПРОЕКТЕ
-# ==========================================
-
-@bot.message_handler(
-    func=lambda m: m.text == "🤖 О проекте"
-)
+@bot.message_handler(func=lambda m: m.text == "ℹ️ О проекте")
 def about(message):
     bot.send_message(
         message.chat.id,
-        "🤖 RoboCareer — помощник по выбору профессии!\n\n"
-        "🎯 Цель проекта — помочь изучить разные профессии.\n\n"
-        "📚 В боте есть учебные материалы.\n"
-        "💼 Есть информация о направлениях работы.\n"
-        "🧠 Можно изучать навыки и новые технологии."
+        "🤖 RoboCareer — учебный проект для знакомства с профессиями. "
+        "Он предлагает идеи и задания, но не принимает решение за тебя. "
+        "Ссылки ведут на внешние образовательные ресурсы."
     )
 
-
-# ==========================================
-# СПИСОК ПРОФЕССИЙ
-# ==========================================
-
-@bot.message_handler(
-    func=lambda m: m.text == "💼 Профессии"
-)
-def careers(message):
-    keyboard = types.InlineKeyboardMarkup()
-
-    for career_id, career in CAREERS.items():
-        keyboard.add(
-            types.InlineKeyboardButton(
-                career["title"],
-                callback_data=f"career_{career_id}"
-            )
-        )
-
-    bot.send_message(
-        message.chat.id,
-        "💼 Выбери интересную профессию:",
-        reply_markup=keyboard
-    )
-
-
-# ==========================================
-# ИНФОРМАЦИЯ О ПРОФЕССИИ
-# ==========================================
-
-@bot.callback_query_handler(
-    func=lambda call: call.data.startswith("career_")
-)
-def career_details(call):
-    career_id = call.data.removeprefix("career_")
-    career = CAREERS.get(career_id)
-
-    bot.answer_callback_query(call.id)
-
-    if not career:
-        bot.send_message(
-            call.message.chat.id,
-            "Профессия не найдена."
-        )
+@bot.callback_query_handler(func=lambda call: True)
+def callbacks(call):
+    data = call.data or ""
+    if data == "quiz:restart":
+        bot.answer_callback_query(call.id)
+        start_quiz(call.message)
         return
-
-    text = (
-        f"{career['title']}\n\n"
-        f"📌 Чем занимается:\n"
-        f"{career['description']}\n\n"
-        f"✅ Плюсы:\n"
-        f"{career['pros']}\n\n"
-        f"⚠️ Сложности:\n"
-        f"{career['cons']}"
-    )
-
-    keyboard = types.InlineKeyboardMarkup()
-
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "📚 Где учиться?",
-            callback_data=f"study_{career_id}"
-        )
-    )
-
-    bot.send_message(
-        call.message.chat.id,
-        text,
-        reply_markup=keyboard
-    )
-
-
-# ==========================================
-# ССЫЛКИ ДЛЯ ОБУЧЕНИЯ ПО ПРОФЕССИИ
-# ==========================================
-
-@bot.callback_query_handler(
-    func=lambda call: call.data.startswith("study_")
-)
-def study_career(call):
-    career_id = call.data.removeprefix("study_")
-    career = CAREERS.get(career_id)
-
-    bot.answer_callback_query(call.id)
-
-    if not career:
-        bot.send_message(
-            call.message.chat.id,
-            "Учебные материалы не найдены."
-        )
-        return
-
-    keyboard = types.InlineKeyboardMarkup()
-
-    for title, url in career["links"]:
-        keyboard.add(
-            types.InlineKeyboardButton(
-                title,
-                url=url
-            )
-        )
-
-    bot.send_message(
-        call.message.chat.id,
-        f"📚 Материалы для профессии:\n"
-        f"{career['title']}\n\n"
-        "Выбери учебник, практику или видео 👇",
-        reply_markup=keyboard
-    )
-
-
-# ==========================================
-# ОБЩЕЕ ОБУЧЕНИЕ
-# ==========================================
-
-@bot.message_handler(
-    func=lambda m: m.text == "📚 Выучить что-то"
-)
-def learning(message):
-    keyboard = types.InlineKeyboardMarkup()
-
-    for career_id, career in CAREERS.items():
-        keyboard.add(
-            types.InlineKeyboardButton(
-                career["title"],
-                callback_data=f"study_{career_id}"
-            )
-        )
-
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "📄 Получить PDF",
-            callback_data="learn_pdf"
-        )
-    )
-
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "🎬 Получить видео",
-            callback_data="learn_video"
-        )
-    )
-
-    bot.send_message(
-        message.chat.id,
-        "📚 Что хочешь изучить?\n\n"
-        "Выбери профессию или учебный файл:",
-        reply_markup=keyboard
-    )
-
-
-# ==========================================
-# ОТПРАВКА PDF И ВИДЕО
-# ==========================================
-
-@bot.callback_query_handler(
-    func=lambda call: call.data in [
-        "learn_pdf",
-        "learn_video"
-    ]
-)
-def send_material(call):
-    bot.answer_callback_query(call.id)
-
-    chat_id = call.message.chat.id
-
-    if call.data == "learn_pdf":
-        file_path = MATERIALS_DIR / "python_guide.pdf"
-
-        if file_path.is_file():
-            try:
-                with file_path.open("rb") as file:
-                    bot.send_document(
-                        chat_id,
-                        file,
-                        caption="📄 Учебное пособие Python"
-                    )
-            except Exception as error:
-                print("Ошибка отправки PDF:", error)
-                bot.send_message(
-                    chat_id,
-                    "Не удалось отправить PDF."
-                )
-        else:
-            bot.send_message(
-                chat_id,
-                "📄 Файл пока не добавлен.\n\n"
-                "Положи python_guide.pdf "
-                "в папку materials."
-            )
-
-    elif call.data == "learn_video":
-        file_path = MATERIALS_DIR / "python_lesson.mp4"
-
-        if file_path.is_file():
-            try:
-                with file_path.open("rb") as file:
-                    bot.send_video(
-                        chat_id,
-                        file,
-                        caption="🎬 Учебное видео Python"
-                    )
-            except Exception as error:
-                print("Ошибка отправки видео:", error)
-                bot.send_message(
-                    chat_id,
-                    "Не удалось отправить видео."
-                )
-        else:
+    if data.startswith("career:"):
+        career_id = data.split(":", 1)[1]
+        if career_id in CAREERS:
+            bot.answer_callback_query(call.id)
             keyboard = types.InlineKeyboardMarkup()
-
-            keyboard.add(
-                types.InlineKeyboardButton(
-                    "▶️ Видео Python",
-                    url="https://www.youtube.com/results?search_query=Python+для+начинающих"
-                )
-            )
-
+            keyboard.add(types.InlineKeyboardButton("📚 Где учиться?", callback_data=f"learn:{career_id}"))
+            bot.send_message(call.message.chat.id, get_career_text(career_id), reply_markup=keyboard)
+        return
+    if data.startswith("learn:"):
+        career_id = data.split(":", 1)[1]
+        if career_id in CAREERS:
+            bot.answer_callback_query(call.id)
+            career = CAREERS[career_id]
             bot.send_message(
-                chat_id,
-                "🎬 Видео пока не добавлено.\n"
-                "Можешь найти уроки по ссылке:",
-                reply_markup=keyboard
+                call.message.chat.id,
+                f"📚 Учебные материалы по направлению «{career['title']}»:",
+                reply_markup=inline_links(career["learn"])
             )
-
-
-# ==========================================
-# РАЗДЕЛ РАБОТА
-# ==========================================
-
-@bot.message_handler(
-    func=lambda m: m.text == "💼 Работа"
-)
-def work(message):
-    keyboard = types.InlineKeyboardMarkup()
-
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "💻 IT и программирование",
-            callback_data="work_it"
-        )
-    )
-
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "🎨 Дизайн",
-            callback_data="work_design"
-        )
-    )
-
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "📊 Аналитика",
-            callback_data="work_data"
-        )
-    )
-
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "🔎 Изучить вакансии",
-            url="https://www.linkedin.com/jobs/"
-        )
-    )
-
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "🧰 Практика GitHub",
-            url="https://github.com/skills"
-        )
-    )
-
-    bot.send_message(
-        message.chat.id,
-        "💼 Раздел «Работа»\n\n"
-        "Выбери направление, чтобы узнать, "
-        "какие навыки стоит изучать.\n\n"
-        "Также можно посмотреть требования "
-        "к профессиям и учебные проекты 👇",
-        reply_markup=keyboard
-    )
-
-
-@bot.callback_query_handler(
-    func=lambda call: call.data.startswith("work_")
-)
-def work_direction(call):
-    directions = {
-        "work_it": (
-            "💻 IT и программирование\n\n"
-            "Полезные навыки:\n"
-            "• Python\n"
-            "• HTML и CSS\n"
-            "• JavaScript\n"
-            "• Git и GitHub\n\n"
-            "Начни с небольших проектов."
-        ),
-        "work_design": (
-            "🎨 Дизайн\n\n"
-            "Полезные навыки:\n"
-            "• Figma\n"
-            "• Композиция\n"
-            "• Цвет и типографика\n"
-            "• Проектирование интерфейсов"
-        ),
-        "work_data": (
-            "📊 Аналитика данных\n\n"
-            "Полезные навыки:\n"
-            "• Python\n"
-            "• SQL\n"
-            "• Таблицы\n"
-            "• Основы статистики"
-        )
-    }
-
+        return
     bot.answer_callback_query(call.id)
 
-    bot.send_message(
-        call.message.chat.id,
-        directions.get(
-            call.data,
-            "Информация пока недоступна."
-        )
-    )
-
-
-# ==========================================
-# ПРОФИЛЬ
-# ==========================================
-
-@bot.message_handler(
-    func=lambda m: m.text == "👤 Мой профиль"
-)
-def profile(message):
-    user = message.from_user
-
-    username = (
-        f"@{user.username}"
-        if user.username
-        else "не указан"
-    )
-
-    bot.send_message(
-        message.chat.id,
-        "👤 Твой профиль RoboCareer\n\n"
-        f"Имя: {user.first_name or 'не указано'}\n"
-        f"Username: {username}\n"
-        f"ID: {user.id}\n\n"
-        "В будущем здесь появятся "
-        "твои интересы и навыки."
-    )
-
-
-# ==========================================
-# НЕИЗВЕСТНЫЕ СООБЩЕНИЯ
-# ==========================================
-
-@bot.message_handler(
-    content_types=["text"],
-    func=lambda m: True
-)
+@bot.message_handler(func=lambda m: True, content_types=["text"])
 def unknown(message):
     bot.send_message(
         message.chat.id,
-        "🤔 Я пока не понимаю эту команду.\n\n"
-        "Выбери кнопку в меню или отправь /start.",
-        reply_markup=create_menu()
+        "Я пока не умею свободно отвечать на любые вопросы. "
+        "Чтобы получить рекомендацию, нажми «🧭 Подобрать профессию».",
+        reply_markup=main_menu()
     )
-
-
-# ==========================================
-# ЗАПУСК
-# ==========================================
 
 if __name__ == "__main__":
-    print("🤖 RoboCareer запущен!")
-
-    bot.infinity_polling(
-        skip_pending=True,
-        timeout=30,
-        long_polling_timeout=30
-    )
+    print("RoboCareer запущен.")
+    bot.infinity_polling(skip_pending=True, timeout=30, long_polling_timeout=30)
